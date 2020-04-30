@@ -2,42 +2,30 @@ package com.gowrav.mycam
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.content.DialogInterface
-import android.content.DialogInterface.OnShowListener
-import android.graphics.BitmapFactory
-import android.os.Build
+import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
-import android.os.Environment.DIRECTORY_DOWNLOADS
 import android.os.Handler
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
-import android.view.Window
-import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.Toast
-import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.os.postDelayed
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.ceylonlabs.imageviewpopup.ImagePopup
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothDeviceDecorator
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothService
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothStatus
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothWriter
-import kotlinx.android.synthetic.*
+import com.squareup.picasso.Picasso
 import kotlinx.android.synthetic.main.activity_main.*
 import java.io.File
-import java.nio.charset.Charset
-import java.time.Instant
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.*
-import kotlin.experimental.and
 
 
 class MainActivity : AppCompatActivity(), BluetoothService.OnBluetoothScanCallback,
@@ -54,10 +42,17 @@ class MainActivity : AppCompatActivity(), BluetoothService.OnBluetoothScanCallba
     private var mWriter: BluetoothWriter? = null
 
     private var mImageString: String = ""
+    private var mImageMode: Char = '0'
+    private var mResetMode: Char = 'A'
     private var mHandler: Handler = Handler()
+    private lateinit var imagePopup: ImagePopup
+    private lateinit var selectedDevice: BluetoothDevice
+
+    private var captureImagedelay: Long = 30000
+    private var deviceReconnectdelay: Long = 10000
 
     private var mRunnable: Runnable = Runnable {
-            takeImage()
+        takeImage()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,6 +60,9 @@ class MainActivity : AppCompatActivity(), BluetoothService.OnBluetoothScanCallba
         setContentView(R.layout.activity_main)
         setSupportActionBar(toolbar)
 
+        imagePopup = ImagePopup(this)
+        imagePopup.isHideCloseIcon = true
+        imagePopup.isImageOnClickClose = true
         pgBar = findViewById<View>(R.id.pg_bar) as ProgressBar
         pgBar!!.visibility = View.GONE
 
@@ -86,17 +84,82 @@ class MainActivity : AppCompatActivity(), BluetoothService.OnBluetoothScanCallba
 
         mWriter = BluetoothWriter(mService)
 
-        fab.setOnClickListener {
-            mHandler.post(mRunnable)
+        fab.setOnLongClickListener {
+            val builder = AlertDialog.Builder(this)
+            //set title for alert dialog
+            builder.setTitle("Capture Mode")
+
+            //performing positive action
+            builder.setPositiveButton("Sunny") { dialogInterface, which ->
+                mImageMode = '1'
+                Toast.makeText(
+                    applicationContext,
+                    "Now mode is Outside and Sunny",
+                    Toast.LENGTH_LONG
+                ).show()
+                dialogInterface.dismiss();
+            }
+            //performing cancel action
+            builder.setNeutralButton("Office") { dialogInterface, which ->
+                mImageMode = '0'
+                Toast.makeText(
+                    applicationContext,
+                    "Now mode is Indoor and Office",
+                    Toast.LENGTH_LONG
+                ).show()
+                dialogInterface.dismiss();
+            }
+            //performing negative action
+            builder.setNegativeButton("Cloudy") { dialogInterface, which ->
+                    mImageMode = '2'
+                    Toast.makeText(
+                        applicationContext,
+                        "Now mode is Outdoor and Cloudy",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    dialogInterface.dismiss();
+            }
+            // Create the AlertDialog
+            val alertDialog: AlertDialog = builder.create()
+            // Set other dialog properties
+            alertDialog.setCancelable(false)
+            alertDialog.show()
+
+            return@setOnLongClickListener true
         }
+
+        fab.setOnClickListener {
+            mRecyclerView!!.isEnabled = false
+            mHandler.post(mRunnable)
+            fab.isEnabled = false
+        }
+
 
     }
 
-    fun takeImage(){
-        Toast.makeText(this,"Capturing Image...",Toast.LENGTH_LONG).show()
-        mImageString = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH:mm:ss")) + ".jpg"
-        mWriter!!.write('0')
-        mHandler.postDelayed(mRunnable,30000);
+    private fun takeImage() {
+        if (mService?.status == BluetoothStatus.NONE) {
+            Toast.makeText(this, "Finding : /${selectedDevice.name}", Toast.LENGTH_SHORT).show()
+            mService!!.connect(selectedDevice)
+            mHandler.postDelayed(mRunnable, deviceReconnectdelay);
+        } else {
+            if (mImageString != "") {
+                if(imagePopup.isShown){
+                    imagePopup.performClick()
+                }
+
+                val file = File(this.getExternalFilesDir(null), "/$mImageString")
+                imagePopup.initiatePopupWithPicasso(file);
+                imagePopup.viewPopup();
+            }
+            Toast.makeText(this, "Capturing Image...", Toast.LENGTH_SHORT).show()
+            mImageString =
+                LocalDateTime.now()
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH:mm:ss")) + ".jpg"
+            mWriter!!.write(mImageMode)
+            mHandler.postDelayed(mRunnable, captureImagedelay);
+
+        }
     }
 
     override fun onResume() {
@@ -115,6 +178,7 @@ class MainActivity : AppCompatActivity(), BluetoothService.OnBluetoothScanCallba
         val id = item.itemId
 
         if (id == R.id.action_scan) {
+            mRecyclerView?.isEnabled = true
             startStopScan()
             return true
         }
@@ -166,9 +230,9 @@ class MainActivity : AppCompatActivity(), BluetoothService.OnBluetoothScanCallba
     override fun onDataRead(buffer: ByteArray, length: Int) {
         val path = this.getExternalFilesDir(null)
         File(path, "/" + mImageString).appendBytes(buffer)
-        if(length<1023){
+        if (length < 1023) {
             val mbuf = ByteArray(1)
-            mbuf[0]='Ù'.toByte()
+            mbuf[0] = 'Ù'.toByte()
             File(path, "/" + mImageString).appendBytes(mbuf)
         }
     }
@@ -179,7 +243,8 @@ class MainActivity : AppCompatActivity(), BluetoothService.OnBluetoothScanCallba
 
         if (status == BluetoothStatus.CONNECTED) {
             Toast.makeText(this, status.toString(), Toast.LENGTH_SHORT).show()
-            Log.d(TAG, "lets Begin..!")
+            Toast.makeText(this, "Reset Interface", Toast.LENGTH_SHORT).show()
+            mWriter!!.write(mResetMode)
         }
 
     }
@@ -198,6 +263,7 @@ class MainActivity : AppCompatActivity(), BluetoothService.OnBluetoothScanCallba
     }
 
     override fun onItemClick(device: BluetoothDeviceDecorator, position: Int) {
+        selectedDevice = device.device
         mService!!.connect(device.device)
     }
 

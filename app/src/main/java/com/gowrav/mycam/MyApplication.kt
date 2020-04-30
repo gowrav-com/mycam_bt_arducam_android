@@ -30,6 +30,7 @@ import android.bluetooth.BluetoothDevice
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothClassicService
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothConfiguration
 import com.github.douglasjunior.bluetoothclassiclibrary.BluetoothService
+import com.squareup.picasso.Picasso
 
 
 import java.util.UUID
@@ -62,6 +63,9 @@ class MyApplication : Application() {
         //or request connection priority manually, mService.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
 
         BluetoothService.init(config)
+
+        Picasso.setSingletonInstance(Picasso.Builder(this).build()) // Only needed if you are using Picasso
+
     }
 
     companion object {
